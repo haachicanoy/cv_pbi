@@ -1,0 +1,11 @@
+# config.yaml
+model:
+  name: "resnet18"
+  learning_rate: 0.001
+  batch_size: 4
+  epochs: 25
+  wloss: 0.6
+  wno_loss: 0.4
+
+dataset:
+  path: "//catalogue/WFP_ClimateRiskPr1/5.Others/thesis/data/pbi_smpl_thr_10"
