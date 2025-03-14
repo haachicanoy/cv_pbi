@@ -24,10 +24,11 @@ cnn_model = config["model"]["name"]
 learning_rate = config["model"]["learning_rate"]
 batch_size = config["model"]["batch_size"]
 epochs = config["model"]["epochs"]
-wloss = config["model"]["wloss"]
-wno_loss = config["model"]["wno_loss"]
+w_low = config["model"]["w_low"]
+w_mdm = config["model"]["w_mdm"]
+w_hgh = config["model"]["w_hgh"]
 dataset_path = config["dataset"]["path"]
-output_path = dataset_path+'/results'
+output_path = dataset_path+'/results_'+cnn_model
 
 import os
 if not os.path.exists(output_path):
@@ -69,11 +70,11 @@ if cnn_model =='efficientnet_b3':
     base_model = models.efficientnet_b3(weights='IMAGENET1K_V1')
 if cnn_model == 'densenet121':
     base_model = models.densenet121(weights='IMAGENET1K_V1')
-model = ResNetWithDOY(base_model, num_classes=2).to(device)
+model = ResNetWithDOY(base_model, num_classes=3).to(device)
 
 # Criterion and optimizer
-weight = torch.tensor((wno_loss, wloss), device=device)
-criterion = nn.CrossEntropyLoss(weight=weight)
+weights = torch.tensor((w_low, w_mdm, w_hgh), device=device)
+criterion = nn.CrossEntropyLoss(weight=weights)
 optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=0.9)
 exp_lr_scheduler = lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
 

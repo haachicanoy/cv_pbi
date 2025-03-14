@@ -37,8 +37,9 @@ def load_config(yaml_file):
     return config
 
 config = load_config("config.yaml")
+cnn_model = config["model"]["name"]
 dataset_path = config["dataset"]["path"]
-output_path = dataset_path+'/results'
+output_path = dataset_path+'/results_'+cnn_model
 
 import os
 if not os.path.exists(output_path):
@@ -78,7 +79,7 @@ class ImageDatasetWithDOY(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.loader = default_loader
-        self.class_to_idx = {'no_loss': 0, 'loss': 1}
+        self.class_to_idx = {'low': 0, 'medium': 1, 'high': 2}
 
     def __len__(self):
         return len(self.annotations)
@@ -112,7 +113,7 @@ class ImageDatasetWithDOY(Dataset):
 # Model definition with DOY feature
 # ----------------------------------------------- #
 class ResNetWithDOY(nn.Module):
-    def __init__(self, base_model, num_classes=2):
+    def __init__(self, base_model, num_classes=3):
         super(ResNetWithDOY, self).__init__()
         # Get the number of features from the original fc layer
         num_ftrs = base_model.fc.in_features
@@ -189,10 +190,12 @@ def save_predictions_to_csv(filenames, logits, probabilities, predictions, label
         'filename': filenames,
         'predicted_label': predictions,
         'true_label': labels,
-        'no_loss_probability': probabilities[:, 0],
-        'loss_probability': probabilities[:, 1],
-        'no_loss_logit': logits[:, 0],
-        'loss_logit': logits[:, 1],
+        'low_probability': probabilities[:, 0],
+        'medium_probability': probabilities[:, 1],
+        'high_probability': probabilities[:, 2],
+        'low_logit': logits[:, 0],
+        'medium_logit': logits[:, 1],
+        'high_logit': logits[:, 2],
         'dataset': dataset_type
     })
     
