@@ -122,24 +122,22 @@ class ResNetWithDOY(nn.Module):
         if hasattr(base_model, 'fc'):  # ResNet
             num_features = base_model.fc.in_features
             base_model.fc = nn.Identity()
-        elif hasattr(base_model, 'classifier'):  # ConvNeXt, EfficientNet
+        elif hasattr(base_model, 'classifier'):  # ConvNeXt, EfficientNet, DenseNet
             if isinstance(base_model.classifier, nn.Sequential):  # ConvNeXt
                 num_features = base_model.classifier[2].in_features
-            else:  # EfficientNet
-                num_features = base_model.classifier[1].in_features
-            base_model.classifier = nn.Identity()
-        elif hasattr(base_model, 'classifier'):  # DenseNet
-            num_features = base_model.classifier.in_features
+            elif isinstance(base_model.classifier, nn.Linear):  # EfficientNet
+                num_features = base_model.classifier.in_features
+            else:  # DenseNet
+                num_features = base_model.classifier.in_features
             base_model.classifier = nn.Identity()
 
-        # DOY embedding
+        # Rest of the initialization remains the same
         self.doy_embedding = nn.Sequential(
             nn.Linear(1, 64),
             nn.ReLU(),
             nn.Linear(64, 256)
         )
         
-        # Combined classifier
         self.classifier = nn.Sequential(
             nn.Linear(num_features + 256, 512),
             nn.ReLU(),
