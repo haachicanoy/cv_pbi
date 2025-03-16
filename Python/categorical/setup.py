@@ -124,8 +124,11 @@ class ResNetWithDOY(nn.Module):
             base_model.fc = nn.Identity()
         elif hasattr(base_model, 'classifier'):  # ConvNeXt, EfficientNet, DenseNet
             if isinstance(base_model.classifier, nn.Sequential):  # ConvNeXt
-                num_features = base_model.classifier[2].in_features
-            elif isinstance(base_model.classifier, nn.Linear):  # EfficientNet
+                if len(base_model.classifier) > 2:  # ConvNeXt
+                    num_features = base_model.classifier[2].in_features
+                else:  # EfficientNet
+                    num_features = base_model.classifier[-1].in_features
+            elif isinstance(base_model.classifier, nn.Linear):  # Some EfficientNet variants
                 num_features = base_model.classifier.in_features
             else:  # DenseNet
                 num_features = base_model.classifier.in_features
