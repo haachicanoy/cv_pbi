@@ -113,57 +113,24 @@ class ImageDatasetWithDOY(Dataset):
 # Model definition with DOY feature
 # ----------------------------------------------- #
 class ResNetWithDOY(nn.Module):
-    def __init__(self, base_model, num_classes):
+    def __init__(self, base_model, num_classes=3):
         super(ResNetWithDOY, self).__init__()
+        # Get the number of features from the original fc layer
+        num_ftrs = base_model.fc.in_features
+
+        # Replace the final fully connected layer with an identity mapping
+        base_model.fc = nn.Identity()
+
         self.base_model = base_model
-        self.model_type = type(base_model).__name__
-        
-        # Get the number of features from the base model
-        if hasattr(base_model, 'fc'):  # ResNet
-            num_features = base_model.fc.in_features
-            base_model.fc = nn.Identity()
-        elif hasattr(base_model, 'classifier'):  # ConvNeXt, EfficientNet
-            if isinstance(base_model.classifier, nn.Sequential):  # ConvNeXt
-                num_features = base_model.classifier[2].in_features
-            else:  # EfficientNet
-                num_features = base_model.classifier[1].in_features
-            base_model.classifier = nn.Identity()
-        elif hasattr(base_model, 'classifier'):  # DenseNet
-            num_features = base_model.classifier.in_features
-            base_model.classifier = nn.Identity()
+        # Fully connected layer that includes DOY feature
+        self.fc = nn.Linear(num_ftrs + 1, num_classes)
 
-        # DOY embedding
-        self.doy_embedding = nn.Sequential(
-            nn.Linear(1, 64),
-            nn.ReLU(),
-            nn.Linear(64, 256)
-        )
-        
-        # Combined classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(num_features + 256, 512),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(512, num_classes)
-        )
-
-    def forward(self, x, doy):
-        # Extract features from the base model
-        features = self.base_model(x)
-        
-        # Handle feature pooling based on model type
-        if features.dim() > 2:
-            # If features are not already pooled (still have spatial dimensions)
-            features = torch.mean(features, dim=[2, 3])
-        
-        # Process DOY
-        doy_features = self.doy_embedding(doy)
-        
-        # Combine features
-        combined = torch.cat((features, doy_features), dim=1)
-        
-        # Final classification
-        return self.classifier(combined)
+    def forward(self, images, doy_features):
+        x = self.base_model(images)
+        x = torch.cat((x, doy_features), dim=1)  # Concatenate the DOY feature
+        self.dropout = nn.Dropout(0.3) # Add 30% dropout
+        x = self.fc(self.dropout(x)) # x = self.fc(x)
+        return x
 
 # ----------------------------------------------- #
 # Early stopping implementation
