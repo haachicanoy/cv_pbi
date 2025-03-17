@@ -9,4 +9,4 @@ model:
   w_hgh: 0.75
 
 dataset:
-  path: "//catalogue/WFP_ClimateRiskPr1/5.Others/thesis/data/pbi_smpl_categorical"
+  path: "/gdrive/My Drive/pbi_smpl_categorical"
