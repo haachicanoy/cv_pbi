@@ -1,6 +1,6 @@
 # config.yaml
 model:
-  name: "resnet18"
+  name: "densenet121"
   learning_rate: 0.001
   batch_size: 4
   epochs: 25
@@ -9,4 +9,5 @@ model:
   w_hgh: 0.75
 
 dataset:
-  path: "/gdrive/My Drive/pbi_smpl_categorical"
+  in_path: "/content/pbi_smpl_categorical"
+  out_path: "/gdrive/My Drive/pbi_smpl_categorical"

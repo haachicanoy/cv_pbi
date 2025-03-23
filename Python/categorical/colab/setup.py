@@ -38,8 +38,9 @@ def load_config(yaml_file):
 
 config = load_config("config.yaml")
 cnn_model = config["model"]["name"]
-dataset_path = config["dataset"]["path"]
-output_path = dataset_path+'/results_'+cnn_model
+dataset_path = config["dataset"]["in_path"]
+output_path = config["dataset"]["out_path"]
+output_path = output_path+'/results_'+cnn_model
 
 import os
 if not os.path.exists(output_path):

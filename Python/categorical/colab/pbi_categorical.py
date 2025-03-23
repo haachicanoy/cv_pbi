@@ -27,8 +27,9 @@ epochs = config["model"]["epochs"]
 w_low = config["model"]["w_low"]
 w_mdm = config["model"]["w_mdm"]
 w_hgh = config["model"]["w_hgh"]
-dataset_path = config["dataset"]["path"]
-output_path = dataset_path+'/results_'+cnn_model
+dataset_path = config["dataset"]["in_path"]
+output_path = config["dataset"]["out_path"]
+output_path = output_path+'/results_'+cnn_model
 
 import os
 if not os.path.exists(output_path):
