@@ -1,0 +1,13 @@
+# config.yaml
+model:
+  name: "densenet121"
+  learning_rate: 0.001
+  batch_size: 4
+  epochs: 25
+  w_low: 0.07
+  w_mdm: 0.18
+  w_hgh: 0.75
+
+dataset:
+  in_path: "/content/pbi_smpl_categorical"
+  out_path: "/gdrive/My Drive/pbi_smpl_categorical"

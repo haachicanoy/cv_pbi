@@ -1,10 +1,10 @@
 # ----------------------------------------------- #
 #!/usr/bin/env python
 # coding: utf-8
-# Crop losses with fine tunning: multi-class response with numerical features
+# Crop losses with fine tunning: binary response
 # By: Harold Achicanoy
 # WUR & ABC
-# May 2025
+# March 2025
 # ----------------------------------------------- #
 
 # ----------------------------------------------- #
@@ -36,18 +36,15 @@ def load_config(yaml_file):
         config = yaml.safe_load(file)
     return config
 
-config = load_config("config.yaml") # Assuming config.yaml is in the same directory or path is correct
-cnn_model_name_from_config = config["model"]["name"] # Renamed to avoid conflict
-dataset_path_from_config = config["dataset"]["in_path"]
-output_path_from_config = config["dataset"]["out_path"]
-# This output_path is specifically for EarlyStopping, ensure it's correctly defined if pbi_categorical.py uses a different one
-# For consistency, it might be better to pass this path to EarlyStopping from pbi_categorical.py
-# However, sticking to minimal changes for now.
-global_output_path_for_early_stopping = output_path_from_config + '/results_' + cnn_model_name_from_config
+config = load_config("config.yaml")
+cnn_model = config["model"]["name"]
+dataset_path = config["dataset"]["in_path"]
+output_path = config["dataset"]["out_path"]
+output_path = output_path+'/results_'+cnn_model
 
 import os
-if not os.path.exists(global_output_path_for_early_stopping):
-    os.makedirs(global_output_path_for_early_stopping, exist_ok=True)
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
 
 # ----------------------------------------------- #
 # Data augmentation and normalization
@@ -73,12 +70,11 @@ data_transforms = {
 # ----------------------------------------------- #
 # Load dataset function
 # ----------------------------------------------- #
-class ImageDatasetWithNumericalFeatures(Dataset):
+class ImageDatasetWithDOY(Dataset):
     def __init__(self, csv_path, root_dir, transform=None):
         """
         Args:
-            csv_path (str): Path to the CSV file with filenames, days_after_sowing, and DOY values.
-                            Expected columns: relative_path, days_after_sowing, day_of_year
+            csv_path (str): Path to the CSV file with filenames and DOY values.
             root_dir (str): Directory with all the images.
             transform (callable, optional): Optional transform to be applied to images.
         """
@@ -86,22 +82,16 @@ class ImageDatasetWithNumericalFeatures(Dataset):
         self.root_dir = root_dir
         self.transform = transform
         self.loader = default_loader
-        # Updated class_to_idx
-        self.class_to_idx = {'basic': 0, 'moderate': 1, 'superior': 2}
+        self.class_to_idx = {'low': 0, 'medium': 1, 'high': 2}
 
     def __len__(self):
         return len(self.annotations)
 
     def __getitem__(self, idx):
-        # Load filename, DAS, DOY, and determine label
-        relative_path = self.annotations.iloc[idx, 0]  # relative_path
+        # Load filename, DOY, and determine label
+        relative_path = self.annotations.iloc[idx, 0]
         img_name = os.path.join(self.root_dir, relative_path)
-        
-        days_after_sowing = self.annotations.iloc[idx, 1] # days_after_sowing
-        day_of_year = self.annotations.iloc[idx, 2]       # day_of_year
-        
-        # Derive label from the folder structure within relative_path
-        # e.g., if relative_path is "basic/image.jpg", label_name is "basic"
+        doy = self.annotations.iloc[idx, 1]
         label_name = os.path.split(os.path.dirname(relative_path))[-1]
         label = self.class_to_idx[label_name]
 
@@ -114,21 +104,20 @@ class ImageDatasetWithNumericalFeatures(Dataset):
         if self.transform:
             image = self.transform(image)
 
-        # Return a dictionary
+        # Return a dictionary instead of a tuple
         return {
             'image': image,
-            'das': torch.tensor([days_after_sowing], dtype=torch.float32),
-            'doy': torch.tensor([day_of_year], dtype=torch.float32),
+            'doy': torch.tensor([doy], dtype=torch.float32),
             'label': torch.tensor(label),
             'filename': relative_path
         }
 
 # ----------------------------------------------- #
-# Model definition with Numerical Features
+# Model definition with DOY feature
 # ----------------------------------------------- #
-class ModelWithNumericalFeatures(nn.Module):
+class ResNetWithDOY(nn.Module):
     def __init__(self, base_model, num_classes):
-        super(ModelWithNumericalFeatures, self).__init__()
+        super(ResNetWithDOY, self).__init__()
         self.base_model = base_model
         self.model_type = type(base_model).__name__
         
@@ -137,80 +126,58 @@ class ModelWithNumericalFeatures(nn.Module):
             num_features = base_model.fc.in_features
             base_model.fc = nn.Identity()
         elif hasattr(base_model, 'classifier'):  # ConvNeXt, EfficientNet, DenseNet
-            # This part handles different structures for 'classifier'
-            if isinstance(base_model.classifier, nn.Sequential):
-                # Attempt to find the last Linear layer's in_features
-                # For ConvNeXt, it's often classifier[2].in_features
-                # For EfficientNet (some variants), it's classifier[-1].in_features
-                # Defaulting to the last layer if it's linear
-                if len(base_model.classifier) > 0 and isinstance(base_model.classifier[-1], nn.Linear):
-                    num_features = base_model.classifier[-1].in_features
-                elif len(base_model.classifier) > 2 and isinstance(base_model.classifier[2], nn.Linear): # Specific for ConvNeXt like structure
+            if isinstance(base_model.classifier, nn.Sequential):  # ConvNeXt
+                if len(base_model.classifier) > 2:  # ConvNeXt
                     num_features = base_model.classifier[2].in_features
-                else: # Fallback or needs specific handling for other Sequential classifiers
-                    # You might need to inspect your specific model if this doesn't work
-                    print(f"Warning: Could not automatically determine num_features for Sequential classifier in {self.model_type}. Defaulting to a common value or erroring soon.")
-                    # Example: for convnext_tiny, classifier is (norm, flatten, linear, norm) -> classifier[2] is Linear
-                    # Let's try to be more robust for models like ConvNeXt or EfficientNet
-                    last_linear_layer = None
-                    for layer in reversed(list(base_model.classifier.children())):
-                        if isinstance(layer, nn.Linear):
-                            last_linear_layer = layer
-                            break
-                    if last_linear_layer:
-                        num_features = last_linear_layer.in_features
-                    else:
-                        raise ValueError(f"Cannot determine num_features for {self.model_type} with Sequential classifier.")
-
-            elif isinstance(base_model.classifier, nn.Linear):  # DenseNet, some EfficientNet variants
+                else:  # EfficientNet
+                    num_features = base_model.classifier[-1].in_features
+            elif isinstance(base_model.classifier, nn.Linear):  # Some EfficientNet variants
                 num_features = base_model.classifier.in_features
-            else:
-                raise ValueError(f"Unsupported classifier type in base_model: {type(base_model.classifier)}")
-            base_model.classifier = nn.Identity() # Remove original classifier
-        else:
-            raise ValueError("Base model must have 'fc' or 'classifier' attribute.")
+            else:  # DenseNet
+                num_features = base_model.classifier.in_features
+            base_model.classifier = nn.Identity()
 
-        # Embedding for 2 numerical features (DAS and DOY)
-        self.numerical_features_embedding = nn.Sequential(
-            nn.Linear(2, 64), # Input dimension is 2 (DAS, DOY)
+        # Rest of the initialization remains the same
+        self.doy_embedding = nn.Sequential(
+            nn.Linear(1, 64),
             nn.ReLU(),
-            nn.Linear(64, 256) # Output embedding size
+            nn.Linear(64, 256)
         )
         
-        # Classifier for combined features
         self.classifier = nn.Sequential(
-            nn.Linear(num_features + 256, 512), # num_image_features + num_embedded_numerical_features
+            nn.Linear(num_features + 256, 512),
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(512, num_classes)
         )
 
-    def forward(self, x_image, x_numerical):
+    def forward(self, x, doy):
         # Extract features from the base model
-        image_features = self.base_model(x_image)
+        features = self.base_model(x)
         
-        # Handle feature pooling if necessary (some models return pooled features, others don't)
-        if image_features.dim() > 2: # e.g. (batch_size, channels, H, W)
-            image_features = torch.mean(image_features, dim=[2, 3]) # Global average pooling
+        # Handle feature pooling based on model type
+        if features.dim() > 2:
+            # If features are not already pooled (still have spatial dimensions)
+            features = torch.mean(features, dim=[2, 3])
         
-        # Process numerical features
-        numerical_embedded_features = self.numerical_features_embedding(x_numerical)
+        # Process DOY
+        doy_features = self.doy_embedding(doy)
         
         # Combine features
-        combined_features = torch.cat((image_features, numerical_embedded_features), dim=1)
+        combined = torch.cat((features, doy_features), dim=1)
         
         # Final classification
-        return self.classifier(combined_features)
+        return self.classifier(combined)
 
 # ----------------------------------------------- #
 # Early stopping implementation
 # ----------------------------------------------- #
 class EarlyStopping:
-    def __init__(self, patience=20, verbose=True, delta=0, filename='checkpoint.pt', drive_path=global_output_path_for_early_stopping):
+    def __init__(self, patience=7, verbose=True, delta=0, filename='checkpoint.pt', drive_path=output_path):
         self.patience = patience
         self.verbose = verbose
         self.delta = delta
-        self.path = os.path.join(drive_path,filename) # Uses global_output_path_for_early_stopping
+        self.path = os.path.join(drive_path,filename)
         self.best_loss = None
         self.early_stop = False
         self.val_loss_min = np.inf
@@ -222,16 +189,13 @@ class EarlyStopping:
             self.best_loss = val_loss
             self.save_checkpoint(val_loss, model)
             self.best_epoch = epoch
-        elif val_loss > self.best_loss - self.delta: # Corrected: val_loss > self.best_loss + self.delta for minimization
-                                                   # Or if using loss, val_loss < self.best_loss - self.delta (improvement)
-                                                   # Original logic: if val_loss > self.best_loss - self.delta  (means val_loss is not significantly better or worse)
-                                                   # Let's stick to original: if loss doesn't decrease by delta
+        elif val_loss > self.best_loss - self.delta:
             self.counter += 1
             if self.verbose:
                 print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
             if self.counter >= self.patience:
                 self.early_stop = True
-        else: # val_loss <= self.best_loss - self.delta (significant improvement)
+        else:
             self.best_loss = val_loss
             self.save_checkpoint(val_loss, model)
             self.counter = 0
@@ -246,7 +210,7 @@ class EarlyStopping:
 # ----------------------------------------------- #
 # Save model predictions
 # ----------------------------------------------- #
-def save_predictions_to_csv(filenames, logits, probabilities, predictions, labels, dataset_type, save_path, das_values=None, doy_values=None):
+def save_predictions_to_csv(filenames, logits, probabilities, predictions, labels, dataset_type, save_path):
     """
     Save model predictions and related information to CSV.
     
@@ -258,41 +222,31 @@ def save_predictions_to_csv(filenames, logits, probabilities, predictions, label
         labels (numpy.ndarray): True labels
         dataset_type (str): 'train' or 'val'
         save_path (str): Path to save the CSV file
-        das_values (numpy.ndarray, optional): Days after sowing values.
-        doy_values (numpy.ndarray, optional): Day of year values.
     """
-    results_dict = {
+    results_df = pd.DataFrame({
         'filename': filenames,
         'predicted_label': predictions,
         'true_label': labels,
-        'basic_probability': probabilities[:, 0],    # Updated label
-        'moderate_probability': probabilities[:, 1],   # Updated label
-        'superior_probability': probabilities[:, 2], # Updated label
-        'basic_logit': logits[:, 0],                 # Updated label
-        'moderate_logit': logits[:, 1],                # Updated label
-        'superior_logit': logits[:, 2],              # Updated label
+        'low_probability': probabilities[:, 0],
+        'medium_probability': probabilities[:, 1],
+        'high_probability': probabilities[:, 2],
+        'low_logit': logits[:, 0],
+        'medium_logit': logits[:, 1],
+        'high_logit': logits[:, 2],
         'dataset': dataset_type
-    }
-    if das_values is not None:
-        results_dict['days_after_sowing'] = das_values.flatten() # Ensure it's 1D
-    if doy_values is not None:
-        results_dict['day_of_year'] = doy_values.flatten() # Ensure it's 1D
+    })
     
-    results_df = pd.DataFrame(results_dict)
     results_df.to_csv(save_path, index=False)
     return results_df
 
 # ----------------------------------------------- #
 # Train model function
 # ----------------------------------------------- #
-# Dataloaders and dataset_sizes will be passed from pbi_categorical.py
-def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_sizes, save_dir, num_epochs=25):
+def train_model(model, criterion, optimizer, scheduler, save_dir, num_epochs=25):
     since = time.time()
     
-    # Initialize early stopping (path will use global_output_path_for_early_stopping by default)
-    # If save_dir from pbi_categorical.py should be used for checkpoint, then pass it:
-    # early_stopping = EarlyStopping(patience=5, verbose=True, filename='best_model.pt', drive_path=save_dir)
-    early_stopping = EarlyStopping(patience=10, verbose=True, filename='best_model_checkpoint.pt', drive_path=save_dir)
+    # Initialize early stopping
+    early_stopping = EarlyStopping(patience=5, verbose=True, filename='best_model.pt')
     
     best_model_wts = copy.deepcopy(model.state_dict())
     best_acc = 0.0
@@ -322,24 +276,17 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
             all_probs = []
             all_preds = []
             all_labels = []
-            all_das = []
-            all_doy = []
 
             for batch in dataloaders[phase]:
                 images = batch['image'].to(device)
-                das = batch['das'].float().to(device) # Days After Sowing
-                doy = batch['doy'].float().to(device) # Day Of Year
+                doy = batch['doy'].float().to(device)
                 labels = batch['label'].to(device)
                 filenames = batch['filename']
-
-                # Concatenate numerical features (DAS, DOY)
-                # Ensure the order matches the nn.Linear input in ModelWithNumericalFeatures
-                numerical_features = torch.cat((das, doy), dim=1) 
 
                 optimizer.zero_grad()
 
                 with torch.set_grad_enabled(phase == 'train'):
-                    outputs = model(images, numerical_features) # Pass both image and numerical features
+                    outputs = model(images, doy)
                     probs = torch.softmax(outputs, dim=1)
                     _, preds = torch.max(outputs, 1)
                     loss = criterion(outputs, labels)
@@ -354,20 +301,13 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
                 all_probs.append(probs.detach().cpu())
                 all_preds.append(preds.detach().cpu())
                 all_labels.append(labels.detach().cpu())
-                all_das.append(das.detach().cpu())
-                all_doy.append(doy.detach().cpu())
-
 
                 running_loss += loss.item() * images.size(0)
                 running_corrects += torch.sum(preds == labels.data)
-            
-            if phase == 'train' and scheduler: # Apply scheduler after train phase
-                scheduler.step()
-
 
             # Calculate epoch metrics
-            epoch_loss = running_loss / dataset_sizes[phase] # Use dataset_sizes
-            epoch_acc = running_corrects.double() / dataset_sizes[phase] # Use dataset_sizes
+            epoch_loss = running_loss / len(dataloaders[phase].dataset)
+            epoch_acc = running_corrects.double() / len(dataloaders[phase].dataset)
 
             print(f'{phase} Loss: {epoch_loss:.4f} Acc: {epoch_acc:.4f}')
             
@@ -376,8 +316,6 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
             epoch_probs = torch.cat(all_probs).numpy()
             epoch_preds = torch.cat(all_preds).numpy()
             epoch_labels = torch.cat(all_labels).numpy()
-            epoch_das = torch.cat(all_das).numpy()
-            epoch_doy = torch.cat(all_doy).numpy()
             
             # Save predictions
             predictions_file = os.path.join(save_dir, f'{phase}_predictions_epoch_{epoch}.csv')
@@ -388,16 +326,14 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
                 epoch_preds,
                 epoch_labels,
                 phase,
-                predictions_file,
-                das_values=epoch_das,
-                doy_values=epoch_doy
+                predictions_file
             )
             
             # Store metrics
             if phase == 'train':
                 train_loss_values.append(epoch_loss)
                 train_acc_values.append(epoch_acc.item())
-            else: # phase == 'val'
+            else:
                 val_loss_values.append(epoch_loss)
                 val_acc_values.append(epoch_acc.item())
                 
@@ -408,10 +344,9 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
                 if epoch_acc > best_acc:
                     best_acc = epoch_acc
                     best_model_wts = copy.deepcopy(model.state_dict())
-                    torch.save(model.state_dict(), os.path.join(save_dir, 'best_accuracy_model.pt')) # Save best acc model
-
-                    # Save best model predictions for validation set
-                    best_predictions_file = os.path.join(save_dir, f'{phase}_predictions_best_accuracy.csv')
+                    
+                    # Save best model predictions
+                    best_predictions_file = os.path.join(save_dir, f'{phase}_predictions_best.csv')
                     save_predictions_to_csv(
                         all_filenames,
                         epoch_logits,
@@ -419,35 +354,28 @@ def train_model(model, criterion, optimizer, scheduler, dataloaders, dataset_siz
                         epoch_preds,
                         epoch_labels,
                         phase,
-                        best_predictions_file,
-                        das_values=epoch_das,
-                        doy_values=epoch_doy
+                        best_predictions_file
                     )
 
         if early_stopping.early_stop:
-            print(f"\nEarly stopping triggered. Best validation loss model was saved at epoch {early_stopping.best_epoch}")
+            print(f"\nEarly stopping triggered. Best model was found at epoch {early_stopping.best_epoch}")
             break
 
     time_elapsed = time.time() - since
     print(f'\nTraining complete in {time_elapsed // 60:.0f}m {time_elapsed % 60:.0f}s')
     print(f'Best val Acc: {best_acc:4f}')
-    if early_stopping.best_epoch is not None:
-        print(f'Best model based on validation loss was found at epoch: {early_stopping.best_epoch}')
+    print(f'Best model was found at epoch: {early_stopping.best_epoch}')
 
     # Save training metrics
-    # Ensure equal length for all metric lists before creating DataFrame
-    num_recorded_epochs = len(train_loss_values)
     metrics_df = pd.DataFrame({
-        'epoch': range(num_recorded_epochs),
+        'epoch': range(len(train_loss_values)),
         'train_loss': train_loss_values,
         'train_acc': train_acc_values,
-        'val_loss': val_loss_values[:num_recorded_epochs], # Slice to match train length in case of early stopping
-        'val_acc': val_acc_values[:num_recorded_epochs]    # Slice to match train length
+        'val_loss': val_loss_values,
+        'val_acc': val_acc_values
     })
     metrics_df.to_csv(os.path.join(save_dir, 'training_metrics.csv'), index=False)
 
-    # Load best model weights (based on validation accuracy)
-    # If early stopping triggered, the model loaded from early_stopping.path might be based on best loss.
-    # Here, we explicitly load the one that gave best_acc.
+    # Load best model weights
     model.load_state_dict(best_model_wts)
     return model
