@@ -328,6 +328,39 @@ dmt |>
   dplyr::ungroup() |>
   base::as.data.frame()
 
+stp <- data.frame(model = cv, epochs = c(22,16,24,15,29))
+stp$model <- dplyr::case_when(stp$model == 'convnext_tiny' ~ 'ConvNeXt tiny',
+                              stp$model == 'densenet121' ~ 'DenseNet 121',
+                              stp$model == 'efficientnet_b3' ~ 'EfficientNet B3',
+                              stp$model == 'resnet18' ~ 'ResNet18',
+                              stp$model == 'resnet50' ~ 'ResNet50')
+recall_by_loss_level <- dmt |>
+  dplyr::filter(
+    (model == 'ConvNeXt tiny' & epoch == 22) |
+      (model == 'DenseNet 121' & epoch == 16) |
+      (model == 'EfficientNet B3' & epoch == 24) |
+      (model == 'ResNet18' & epoch == 15) |
+      (model == 'ResNet50' & epoch == 29)
+  ) |>
+  dplyr::filter(metric == 'Recall' & dataset == 'Validation') |>
+  dplyr::select(loss, value, model) |>
+  tidyr::pivot_wider(names_from = model, values_from = value) |>
+  base::as.data.frame()
+
+recall_by_loss_level$Average <- apply(recall_by_loss_level[,-1], 1, mean)
+recall_by_loss_level$`ConvNeXt tiny` <- round(recall_by_loss_level$`ConvNeXt tiny`, 3)
+recall_by_loss_level$`DenseNet 121` <- round(recall_by_loss_level$`DenseNet 121`, 3)
+recall_by_loss_level$`EfficientNet B3` <- round(recall_by_loss_level$`EfficientNet B3`, 3)
+recall_by_loss_level$ResNet18 <- round(recall_by_loss_level$ResNet18, 3)
+recall_by_loss_level$ResNet50 <- round(recall_by_loss_level$ResNet50, 3)
+recall_by_loss_level$Average <- round(recall_by_loss_level$Average, 3)
+
+
+
+
+
+
+
 
 
 
