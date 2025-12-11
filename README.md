@@ -7,4 +7,5 @@ The `cv_pbi` repository has the different tested models to predict yield losses 
 - Minor losses: 0-33% loss
 - Moderate losses: 33-66% loss
 - Large losses: 66-100% loss
-  
+
+![Methodological framework](/images/framework.jpg)
