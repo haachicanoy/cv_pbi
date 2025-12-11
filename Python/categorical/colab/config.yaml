@@ -1,6 +1,6 @@
 # config.yaml
 model:
-  name: "convnext_tiny"
+  name: "efficientnet_b3"
   learning_rate: 0.001
   batch_size: 80
   epochs: 30
@@ -10,4 +10,4 @@ model:
 
 dataset:
   in_path: "/content/pbi_kenya"
-  out_path: "/gdrive/My Drive/pbi_kenya"
+  out_path: "/gdrive/My Drive/pbi_kenya" # "/content/test" only for generating heatmaps  

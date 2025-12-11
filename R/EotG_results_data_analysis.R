@@ -143,9 +143,9 @@ dmt$model <- dplyr::case_when(dmt$model == 'convnext_tiny' ~ 'ConvNeXt tiny',
                               dmt$model == 'efficientnet_b3' ~ 'EfficientNet B3',
                               dmt$model == 'resnet18' ~ 'ResNet18',
                               dmt$model == 'resnet50' ~ 'ResNet50')
-dmt$loss <- dplyr::case_when(dmt$loss == 'Class: 0' ~ 'Basic',
+dmt$loss <- dplyr::case_when(dmt$loss == 'Class: 0' ~ 'Minor',
                              dmt$loss == 'Class: 1' ~ 'Moderate',
-                             dmt$loss == 'Class: 2' ~ 'Superior',
+                             dmt$loss == 'Class: 2' ~ 'Large',
                              dmt$loss == 'all' ~ 'all')
 
 # MCC during the last epoch by model
@@ -174,13 +174,13 @@ gp
 plt <- MetBrewer::met.brewer(name = 'Egypt', n = 3, type = 'discrete')
 gg <- dmt |>
   dplyr::filter(metric == 'MCC' & loss != 'all') |>
-  dplyr::mutate(loss = factor(loss, levels = c('Basic','Moderate','Superior'), labels = c('Small','Medium','Large'))) |>
+  dplyr::mutate(loss = factor(loss, levels = c('Minor','Moderate','Large'))) |>
   ggplot2::ggplot(aes(x = epoch, y = value, colour = loss)) +
   ggplot2::geom_line(alpha = 1, size = 0.9) +
   ggplot2::facet_grid(dataset~model, scales = 'free_x') +
   ggplot2::xlab('Epoch') +
   ggplot2::ylab('Matthews Correlation Coefficient') +
-  ggplot2::labs(colour = 'Loss level') +
+  ggplot2::labs(colour = 'Crop loss category') +
   ggplot2::scale_colour_manual(values = plt) +
   ggplot2::theme_bw() +
   gg_pars; gg
@@ -191,97 +191,103 @@ gp <- plotly::ggplotly(gg)
 gp
 
 # Predictors' importance (partial dependency plots)
-stp <- data.frame(model = cv, epochs = c(22,16,24,15,29))
-pdp_vls <- 1:nrow(stp) |>
-  purrr::map(.f = function(i) {
-    cat('Loading training and validation predictions for:',cv[i],'...\n')
-    tr <- list.files(path = file.path(wd, paste0('results_',cv[i])), pattern = '^train', full.names = T) # train results by iteration
-    tr <- tr[grep(pattern = '_epoch_', x = tr)] |> gtools::mixedsort()
-    vr <- list.files(path = file.path(wd, paste0('results_',cv[i])), pattern = '^val', full.names = T) # validation results by iteration
-    vr <- vr[grep(pattern = '_epoch_', x = vr)] |> gtools::mixedsort()
-    tp <- utils::read.csv(tr[stp$epochs[i]]); rm(tr) # training predictions
-    vp <- utils::read.csv(vr[stp$epochs[i]]); rm(vr) # validation predictions
-    dfm <- rbind(tp, vp)
-    cat('Fitting Basic models... \n')
-    set.seed(1235)
-    partitions <- caret::createDataPartition(y = dfm$basic_probability, times = 20, p = 0.2, list = T)
-    bas_pdp <- 1:length(partitions) |>
-      purrr::map(.f = function(j) {
-        sdfm <- dfm[partitions[[j]],]
-        model_caret <- caret::train(basic_probability ~ days_after_sowing + day_of_year,
-                                    data       = sdfm,
-                                    method     = 'ranger',
-                                    trControl  = trainControl(method = 'cv', number = 5, verboseIter = F),
-                                    num.trees  = 500,
-                                    importance = 'impurity_corrected')
-        pdp_dfm_DAS <- pdp::partial(model_caret$finalModel, pred.var = c('days_after_sowing'), train = sdfm) |> base::as.data.frame()
-        pdp_dfm_DAS <- pdp_dfm_DAS |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
-        pdp_dfm_DOY <- pdp::partial(model_caret$finalModel, pred.var = c('day_of_year'), train = sdfm) |> base::as.data.frame()
-        pdp_dfm_DOY <- pdp_dfm_DOY |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
-        pdp_dfm <- rbind(pdp_dfm_DAS, pdp_dfm_DOY); rm(pdp_dfm_DAS, pdp_dfm_DOY)
-        pdp_dfm$Resample <- j
-        return(pdp_dfm)
-      }) |> dplyr::bind_rows()
-    bas_pdp$loss <- 'Basic'
-    cat('Fitting Moderate models... \n')
-    set.seed(1235)
-    partitions <- caret::createDataPartition(y = dfm$moderate_probability, times = 20, p = 0.2, list = T)
-    mod_pdp <- 1:length(partitions) |>
-      purrr::map(.f = function(j) {
-        sdfm <- dfm[partitions[[j]],]
-        model_caret <- caret::train(moderate_probability ~ days_after_sowing + day_of_year,
-                                    data       = sdfm,
-                                    method     = 'ranger',
-                                    trControl  = trainControl(method = 'cv', number = 5, verboseIter = F),
-                                    num.trees  = 500,
-                                    importance = 'impurity_corrected')
-        pdp_dfm_DAS <- pdp::partial(model_caret$finalModel, pred.var = c('days_after_sowing'), train = sdfm) |> base::as.data.frame()
-        pdp_dfm_DAS <- pdp_dfm_DAS |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
-        pdp_dfm_DOY <- pdp::partial(model_caret$finalModel, pred.var = c('day_of_year'), train = sdfm) |> base::as.data.frame()
-        pdp_dfm_DOY <- pdp_dfm_DOY |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
-        pdp_dfm <- rbind(pdp_dfm_DAS, pdp_dfm_DOY); rm(pdp_dfm_DAS, pdp_dfm_DOY)
-        pdp_dfm$Resample <- j
-        return(pdp_dfm)
-      }) |> dplyr::bind_rows()
-    mod_pdp$loss <- 'Moderate'
-    cat('Fitting Superior models... \n')
-    set.seed(1235)
-    partitions <- caret::createDataPartition(y = dfm$superior_probability, times = 20, p = 0.2, list = T)
-    sup_pdp <- 1:length(partitions) |>
-      purrr::map(.f = function(j) {
-        sdfm <- dfm[partitions[[j]],]
-        model_caret <- caret::train(superior_probability ~ days_after_sowing + day_of_year,
-                                    data       = sdfm,
-                                    method     = 'ranger',
-                                    trControl  = trainControl(method = 'cv', number = 5, verboseIter = F),
-                                    num.trees  = 500,
-                                    importance = 'impurity_corrected')
-        pdp_dfm_DAS <- pdp::partial(model_caret$finalModel, pred.var = c('days_after_sowing'), train = sdfm) |> base::as.data.frame()
-        pdp_dfm_DAS <- pdp_dfm_DAS |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
-        pdp_dfm_DOY <- pdp::partial(model_caret$finalModel, pred.var = c('day_of_year'), train = sdfm) |> base::as.data.frame()
-        pdp_dfm_DOY <- pdp_dfm_DOY |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
-        pdp_dfm <- rbind(pdp_dfm_DAS, pdp_dfm_DOY); rm(pdp_dfm_DAS, pdp_dfm_DOY)
-        pdp_dfm$Resample <- j
-        return(pdp_dfm)
-      }) |> dplyr::bind_rows()
-    sup_pdp$loss <- 'Superior'
-    pdps <- dplyr::bind_rows(bas_pdp, mod_pdp, sup_pdp); rm(bas_pdp, mod_pdp, sup_pdp)
-    pdps$model <- cv[i]
-    return(pdps)
-  }) |> dplyr::bind_rows()
-utils::write.csv(x = pdp_vls, file = file.path(oneback(wd),'pdp_predictors.csv'), row.names = F)
-pdp_vls <- utils::read.csv(file.path(oneback(wd),'pdp_predictors.csv'))
+if (!file.exists(file.path(oneback(wd),'pdp_predictors.csv'))) {
+  stp <- data.frame(model = cv, epochs = c(22,16,24,15,29))
+  pdp_vls <- 1:nrow(stp) |>
+    purrr::map(.f = function(i) {
+      cat('Loading training and validation predictions for:',cv[i],'...\n')
+      tr <- list.files(path = file.path(wd, paste0('results_',cv[i])), pattern = '^train', full.names = T) # train results by iteration
+      tr <- tr[grep(pattern = '_epoch_', x = tr)] |> gtools::mixedsort()
+      vr <- list.files(path = file.path(wd, paste0('results_',cv[i])), pattern = '^val', full.names = T) # validation results by iteration
+      vr <- vr[grep(pattern = '_epoch_', x = vr)] |> gtools::mixedsort()
+      tp <- utils::read.csv(tr[stp$epochs[i]]); rm(tr) # training predictions
+      vp <- utils::read.csv(vr[stp$epochs[i]]); rm(vr) # validation predictions
+      dfm <- rbind(tp, vp)
+      cat('Fitting Basic models... \n')
+      set.seed(1235)
+      partitions <- caret::createDataPartition(y = dfm$basic_probability, times = 20, p = 0.2, list = T)
+      bas_pdp <- 1:length(partitions) |>
+        purrr::map(.f = function(j) {
+          sdfm <- dfm[partitions[[j]],]
+          model_caret <- caret::train(basic_probability ~ days_after_sowing + day_of_year,
+                                      data       = sdfm,
+                                      method     = 'ranger',
+                                      trControl  = trainControl(method = 'cv', number = 5, verboseIter = F),
+                                      num.trees  = 500,
+                                      importance = 'impurity_corrected')
+          pdp_dfm_DAS <- pdp::partial(model_caret$finalModel, pred.var = c('days_after_sowing'), train = sdfm) |> base::as.data.frame()
+          pdp_dfm_DAS <- pdp_dfm_DAS |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
+          pdp_dfm_DOY <- pdp::partial(model_caret$finalModel, pred.var = c('day_of_year'), train = sdfm) |> base::as.data.frame()
+          pdp_dfm_DOY <- pdp_dfm_DOY |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
+          pdp_dfm <- rbind(pdp_dfm_DAS, pdp_dfm_DOY); rm(pdp_dfm_DAS, pdp_dfm_DOY)
+          pdp_dfm$Resample <- j
+          return(pdp_dfm)
+        }) |> dplyr::bind_rows()
+      bas_pdp$loss <- 'Basic'
+      cat('Fitting Moderate models... \n')
+      set.seed(1235)
+      partitions <- caret::createDataPartition(y = dfm$moderate_probability, times = 20, p = 0.2, list = T)
+      mod_pdp <- 1:length(partitions) |>
+        purrr::map(.f = function(j) {
+          sdfm <- dfm[partitions[[j]],]
+          model_caret <- caret::train(moderate_probability ~ days_after_sowing + day_of_year,
+                                      data       = sdfm,
+                                      method     = 'ranger',
+                                      trControl  = trainControl(method = 'cv', number = 5, verboseIter = F),
+                                      num.trees  = 500,
+                                      importance = 'impurity_corrected')
+          pdp_dfm_DAS <- pdp::partial(model_caret$finalModel, pred.var = c('days_after_sowing'), train = sdfm) |> base::as.data.frame()
+          pdp_dfm_DAS <- pdp_dfm_DAS |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
+          pdp_dfm_DOY <- pdp::partial(model_caret$finalModel, pred.var = c('day_of_year'), train = sdfm) |> base::as.data.frame()
+          pdp_dfm_DOY <- pdp_dfm_DOY |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
+          pdp_dfm <- rbind(pdp_dfm_DAS, pdp_dfm_DOY); rm(pdp_dfm_DAS, pdp_dfm_DOY)
+          pdp_dfm$Resample <- j
+          return(pdp_dfm)
+        }) |> dplyr::bind_rows()
+      mod_pdp$loss <- 'Moderate'
+      cat('Fitting Superior models... \n')
+      set.seed(1235)
+      partitions <- caret::createDataPartition(y = dfm$superior_probability, times = 20, p = 0.2, list = T)
+      sup_pdp <- 1:length(partitions) |>
+        purrr::map(.f = function(j) {
+          sdfm <- dfm[partitions[[j]],]
+          model_caret <- caret::train(superior_probability ~ days_after_sowing + day_of_year,
+                                      data       = sdfm,
+                                      method     = 'ranger',
+                                      trControl  = trainControl(method = 'cv', number = 5, verboseIter = F),
+                                      num.trees  = 500,
+                                      importance = 'impurity_corrected')
+          pdp_dfm_DAS <- pdp::partial(model_caret$finalModel, pred.var = c('days_after_sowing'), train = sdfm) |> base::as.data.frame()
+          pdp_dfm_DAS <- pdp_dfm_DAS |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
+          pdp_dfm_DOY <- pdp::partial(model_caret$finalModel, pred.var = c('day_of_year'), train = sdfm) |> base::as.data.frame()
+          pdp_dfm_DOY <- pdp_dfm_DOY |> tidyr::pivot_longer(cols = 1, names_to = 'predictor', values_to = 'value') |> base::as.data.frame()
+          pdp_dfm <- rbind(pdp_dfm_DAS, pdp_dfm_DOY); rm(pdp_dfm_DAS, pdp_dfm_DOY)
+          pdp_dfm$Resample <- j
+          return(pdp_dfm)
+        }) |> dplyr::bind_rows()
+      sup_pdp$loss <- 'Superior'
+      pdps <- dplyr::bind_rows(bas_pdp, mod_pdp, sup_pdp); rm(bas_pdp, mod_pdp, sup_pdp)
+      pdps$model <- cv[i]
+      return(pdps)
+    }) |> dplyr::bind_rows()
+  utils::write.csv(x = pdp_vls, file = file.path(oneback(wd),'pdp_predictors.csv'), row.names = F)
+} else {
+  pdp_vls <- utils::read.csv(file.path(oneback(wd),'pdp_predictors.csv'))
+}
 pdp_vls$model <- dplyr::case_when(pdp_vls$model == 'convnext_tiny' ~ 'ConvNeXt tiny',
                                   pdp_vls$model == 'densenet121' ~ 'DenseNet 121',
                                   pdp_vls$model == 'efficientnet_b3' ~ 'EfficientNet B3',
                                   pdp_vls$model == 'resnet18' ~ 'ResNet18',
                                   pdp_vls$model == 'resnet50' ~ 'ResNet50')
+pdp_vls$loss <- dplyr::case_when(pdp_vls$loss == 'Basic' ~ 'Minor',
+                                 pdp_vls$loss == 'Moderate' ~ 'Moderate',
+                                 pdp_vls$loss == 'Superior' ~ 'Large')
 
 # Days after sowing partial dependence plot
 gg <- pdp_vls |>
   dplyr::filter(predictor == 'days_after_sowing') |>
   dplyr::mutate(value = value * (206-1) + 1) |>
-  dplyr::mutate(loss = factor(loss, levels = c('Basic','Moderate','Superior'), labels = c('Small','Medium','Large'))) |>
+  dplyr::mutate(loss = factor(loss, levels = c('Minor','Moderate','Large'))) |>
   ggplot2::ggplot(aes(x = value, y = yhat, colour = Resample, group = Resample)) +
   ggplot2::geom_line(alpha = 0.2) +
   ggplot2::facet_grid(loss ~ model, scales = 'free_y') +
@@ -289,7 +295,7 @@ gg <- pdp_vls |>
   ggplot2::ylab('Probability') +
   ggplot2::theme_bw() +
   gg_pars +
-  ggplot2::theme(legend.position = 'none')
+  ggplot2::theme(legend.position = 'none'); gg
 outfile <- file.path(oneback(wd),'graphs/paper2_fig3_das_vs_probability.png')
 dir.create(dirname(outfile))
 ggplot2::ggsave(filename = outfile, plot = gg, device = 'png', width = 10, height = 7, units = 'in', dpi = 350)
@@ -300,7 +306,7 @@ gp
 gg <- pdp_vls |>
   dplyr::filter(predictor == 'day_of_year') |>
   dplyr::mutate(value = value * (366-1) + 1) |>
-  dplyr::mutate(loss = factor(loss, levels = c('Basic','Moderate','Superior'), labels = c('Small','Medium','Large'))) |>
+  dplyr::mutate(loss = factor(loss, levels = c('Minor','Moderate','Large'))) |>
   ggplot2::ggplot(aes(x = value, y = yhat, colour = Resample, group = Resample)) +
   ggplot2::geom_line(alpha = 0.2) +
   ggplot2::facet_grid(loss ~ model, scales = 'free_y') +
@@ -308,7 +314,7 @@ gg <- pdp_vls |>
   ggplot2::ylab('Probability') +
   ggplot2::theme_bw() +
   gg_pars +
-  ggplot2::theme(legend.position = 'none')
+  ggplot2::theme(legend.position = 'none'); gg
 outfile <- file.path(oneback(wd),'graphs/paper2_fig3_doy_vs_probability.png')
 dir.create(dirname(outfile))
 ggplot2::ggsave(filename = outfile, plot = gg, device = 'png', width = 10, height = 7, units = 'in', dpi = 350)
