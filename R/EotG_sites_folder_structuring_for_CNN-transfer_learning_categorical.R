@@ -19,6 +19,15 @@ normalize_indicator <- function(r) {
   r_nrm <- (r - mn)/(mx - mn)
   return(r_nrm)
 } # DAS: 1 to 206
+gg_pars <- ggplot2::theme(legend.position = 'bottom',
+                          axis.text.x     = element_text(size = 14, colour = 'black'),
+                          axis.text.y     = element_text(size = 14, colour = 'black'),
+                          axis.title      = element_text(size = 15, colour = 'black'),
+                          legend.title    = element_text(size = 15),
+                          legend.text     = element_text(size = 14),
+                          strip.text      = element_text(size = 14), 
+                          axis.line       = element_blank(),
+                          axis.ticks      = element_blank())
 
 ## Define directories ----
 wd <- 'D:/OneDrive - CGIAR/PhD/data/EotG_data_final_no_git' # Working directory
@@ -88,16 +97,20 @@ length(unique(lb_info$key))
 
 # Filter by maize
 lb_info_maize <- lb_info[lb_info$crop_name == 'maize',]
-lb_info_maize |>
+gg <- lb_info_maize |>
   ggplot2::ggplot(aes(x = days_from_sowing)) +
   ggplot2::geom_histogram(color = 'darkblue', fill = 'lightblue') +
   ggplot2::geom_vline(xintercept = c(0, 210), color = 'red', size = 0.8, linetype = 'dashed') +
   ggplot2::theme_bw() +
-  ggplot2::xlab('Number of Days After Sowing') +
-  ggplot2::ylab('Number of images')
+  ggplot2::xlab('Number of days after sowing') +
+  ggplot2::ylab('Number of images') +
+  gg_pars
+ggplot2::ggsave(filename = 'D:/OneDrive - CGIAR/PhD/papers/paper2/graphs/paper2_figs2_das_distribution.png', plot = gg, device = 'png', width = 6, height = 5, units = 'in', dpi = 350)
 lb_info_maize <- lb_info_maize[lb_info_maize$days_from_sowing > 0,]
 lb_info_maize <- lb_info_maize[lb_info_maize$days_from_sowing < 210,]
 lb_info_maize$year <- lubridate::year(lb_info_maize$date)
+
+summary(lb_info_maize$days_from_sowing); sd(lb_info_maize$days_from_sowing)
 
 lm_fit <- lm(extent ~ days_from_sowing + doy + year, data = lb_info_maize)
 summary(lm_fit)
